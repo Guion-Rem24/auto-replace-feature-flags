@@ -1,4 +1,8 @@
 {
   "include": ["./"],
+  "exclude": ["node_modules", "dist", "build", "coverage", "test", "**/*.spec.ts"],
+  "compilerOptions": {
+    "declaration": false
+  },
   "references": [{"path": "./tsconfig.app.json"}, {"path": "./tsconfig.node.json"}],
 }
