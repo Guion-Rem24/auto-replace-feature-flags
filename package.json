@@ -1,0 +1,7 @@
+{
+  "name": "auto-replace-feature-flags",
+  "version": "1.0.0",
+  "description": "Auto Replacing Feature Flags",
+  "main": "index.js",
+  "license": "MIT"
+}
