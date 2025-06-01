@@ -3,5 +3,8 @@
   "version": "1.0.0",
   "description": "Auto Replacing Feature Flags",
   "main": "index.js",
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "ts-morph": "^26.0.0"
+  }
 }
