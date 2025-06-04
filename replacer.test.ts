@@ -1,5 +1,5 @@
-import { Project } from "ts-morph";
-import { BranchReplacer } from "./replacer";
+import { Project } from 'ts-morph';
+import { BranchReplacer } from './replacer';
 
 function createProjectWithSource(sourceText: string): Project {
   const project = new Project({
@@ -10,21 +10,21 @@ function createProjectWithSource(sourceText: string): Project {
       jsx: 2,
     },
   });
-  project.createSourceFile("test.tsx", sourceText);
+  project.createSourceFile('test.tsx', sourceText);
   return project;
 }
 
 function normalizeText(text: string) {
-  return text.replace(/\s+/g, " ").trim();
+  return text.replace(/\s+/g, ' ').trim();
 }
 
-describe("BranchReplacer.replaceUseValueBranchesWithKey - all conditions", () => {
-  const key = "role";
+describe('BranchReplacer.replaceUseValueBranchesWithKey - all conditions', () => {
+  const key = 'role';
 
   test.each([
     // simple boolean
     [
-      "if with boolean true",
+      'if with boolean true',
       `import { useValue } from "@some-library";
        const result = useValue("role");
        if (result) doA(); else doB();`,
@@ -39,36 +39,36 @@ describe("BranchReplacer.replaceUseValueBranchesWithKey - all conditions", () =>
       `import { useValue } from "@some-library";
        const result = useValue("role");
        if (result === "admin") doA(); else doB();`,
-      "admin",
+      'admin',
       `import { useValue } from "@some-library";
        doA();`,
     ],
 
     // logical && and ||
     [
-      "complex condition with && and ||",
+      'complex condition with && and ||',
       `import { useValue } from "@some-library";
        const result = useValue("role");
        if ((result === "admin" && isAdmin()) || (result === "guest" && isGuest())) doX(); else doY();`,
-      "admin",
+      'admin',
       `import { useValue } from "@some-library";
-       if (isAdmin()) doX(); else doY();`,
+       if ((isAdmin()) || (false)) doX(); else doY();`,
     ],
 
     // ternary
     [
-      "ternary with ===",
+      'ternary with ===',
       `import { useValue } from "@some-library";
        const result = useValue("role");
        const label = result === "admin" ? "adminLabel" : "userLabel";`,
-      "admin",
+      'admin',
       `import { useValue } from "@some-library";
        const label = "adminLabel";`,
     ],
 
     // negation
     [
-      "if with !result",
+      'if with !result',
       `import { useValue } from "@some-library";
       const result = useValue("role");
       if (!result) doFalse(); else doTrue();`,
@@ -79,17 +79,17 @@ describe("BranchReplacer.replaceUseValueBranchesWithKey - all conditions", () =>
 
     // result removal
     [
-      "declaration removed after replacement",
+      'declaration removed after replacement',
       `import { useValue } from "@some-library";
       const result = useValue("role");
       if (result === "admin") doAdmin(); else doGuest();`,
-      "admin",
+      'admin',
       `import { useValue } from "@some-library";
       doAdmin();`,
     ],
-  ])("%s", (_, source, expectedValue, expectedOutput) => {
+  ])('%s', (_, source, expectedValue, expectedOutput) => {
     const project = createProjectWithSource(source);
-    const replacer = new BranchReplacer(project, {[key]: expectedValue});
+    const replacer = new BranchReplacer(project, { [key]: expectedValue });
     replacer.replaceUseValueBranchesWithKey(key);
 
     const resultText = project.getSourceFiles()[0].getFullText();
