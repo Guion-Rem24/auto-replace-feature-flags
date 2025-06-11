@@ -8,11 +8,14 @@ import {
   SourceFile,
   ts,
 } from 'ts-morph';
-import { Identifier, Statement, textChangeRangeIsUnchanged } from 'typescript';
 
 type ValueMap = Record<string, boolean | string>;
 
 export class BranchReplacer {
+  private ReplacementNodeMap = new Map<
+    Node<ts.Node>,
+    { replacement: string; asCondition: boolean | 'unknown' }
+  >();
   constructor(
     private readonly project: Project,
     private readonly valueMap: ValueMap
@@ -33,12 +36,10 @@ export class BranchReplacer {
         .map((r) => r.getNode())
         .filter((node) => node.getParent() !== decl);
 
+      // AllowFunction or FunctionDeclaration
       for (const refNode of refNodes) {
-        const { condition: evaluated, parent } = this.resolveCondition(
-          refNode,
-          varName,
-          expected
-        );
+        const { condition: evaluated, parent: refNodeParent } =
+          this.resolveCondition(refNode, varName, expected);
         if (evaluated === undefined) {
           console.warn(
             `Could not resolve condition for variable "${varName}" in file "${decl.getSourceFile().getBaseName()}".`
@@ -46,73 +47,154 @@ export class BranchReplacer {
           continue;
         }
 
-        if (!parent) {
+        if (!refNodeParent) {
           continue;
         }
 
-        if (Node.isIfStatement(parent)) {
-          // const cond = parent.getExpression();
-          // const evaluated = this.tryEvaluateCondition(cond, varName, expected);
-          if (evaluated === true) {
-            parent.replaceWithText(parent.getThenStatement().getText());
-          } else if (evaluated === false) {
-            const elseStmt = parent.getElseStatement();
-            if (elseStmt) {
-              parent.replaceWithText(elseStmt.getText());
-            } else {
-              parent.remove();
+        let parent = refNodeParent;
+        let node = refNode;
+
+        while (parent !== undefined) {
+          if (this.ReplacementNodeMap.has(parent)) {
+            // no longer to evaluate parent
+            // when parent has already processed and the evaluation is uniquely determined
+            break;
+          }
+          const evaluatedNode = this.ReplacementNodeMap.get(node);
+          if (Node.isIfStatement(parent)) {
+            if (
+              evaluatedNode
+                ? evaluatedNode.asCondition === true
+                : evaluated === true
+            ) {
+              this.ReplacementNodeMap.set(parent, {
+                replacement: parent.getThenStatement().getText(),
+                asCondition: true,
+              });
+            } else if (
+              evaluatedNode
+                ? evaluatedNode.asCondition === false
+                : evaluated === false
+            ) {
+              const elseStmt = parent.getElseStatement();
+              if (elseStmt) {
+                this.ReplacementNodeMap.set(parent, {
+                  replacement: elseStmt.getText(),
+                  asCondition: 'unknown', // CHECK: 本当か？
+                });
+              } else {
+                this.ReplacementNodeMap.set(parent, {
+                  replacement: '',
+                  asCondition: false,
+                });
+              }
             }
+          } else if (Node.isConditionalExpression(parent)) {
+            // 三項演算子
+            const cond = parent.getCondition();
+            const evaluated = this.tryEvaluateCondition(
+              cond,
+              varName,
+              expected
+            );
+            if (evaluated === true) {
+              this.ReplacementNodeMap.set(parent, {
+                replacement: parent.getWhenTrue().getText(),
+                asCondition: true,
+              });
+            } else if (evaluated === false) {
+              this.ReplacementNodeMap.set(parent, {
+                replacement: parent.getWhenFalse().getText(),
+                asCondition: false,
+              });
+            }
+          } else if (Node.isBinaryExpression(parent)) {
+            const op = parent.getOperatorToken().getKind();
+            const [left, right] = [parent.getLeft(), parent.getRight()];
+
+            const leftEval = this.ReplacementNodeMap.has(left)
+              ? this.ReplacementNodeMap.get(left)!.asCondition
+              : this.tryEvaluateCondition(left, varName, expected);
+            const rightEval = this.ReplacementNodeMap.has(right)
+              ? this.ReplacementNodeMap.get(right)!.asCondition
+              : this.tryEvaluateCondition(right, varName, expected);
+            switch (op) {
+              case SyntaxKind.AmpersandAmpersandToken:
+                if (!!leftEval) {
+                  this.ReplacementNodeMap.set(parent, {
+                    replacement: right.getText(),
+                    asCondition:
+                      typeof rightEval === 'undefined' ? 'unknown' : true, //' unknown' かどうかはrightEvalがundefinedかどうかによる
+                  });
+                } else {
+                  this.ReplacementNodeMap.set(parent, {
+                    replacement: 'false',
+                    asCondition: false,
+                  });
+                }
+                this.ReplacementNodeMap.delete(left);
+                this.ReplacementNodeMap.delete(right);
+                break;
+              case SyntaxKind.BarBarToken:
+                if (!leftEval) {
+                  this.ReplacementNodeMap.set(parent, {
+                    replacement: right.getText(),
+                    asCondition:
+                      typeof rightEval === 'undefined' ? 'unknown' : true,
+                  });
+                } else {
+                  this.ReplacementNodeMap.set(parent, {
+                    replacement:
+                      this.ReplacementNodeMap.get(left)?.replacement ??
+                      left.getText(),
+                    asCondition: leftEval === 'unknown' ? 'unknown' : true,
+                  });
+                }
+                this.ReplacementNodeMap.delete(left);
+                this.ReplacementNodeMap.delete(right);
+                break;
+            }
+          } else if (Node.isParenthesizedExpression(parent)) {
+            // If the parent is a ParenthesizedExpression, we need to check its parent
+            const grandParent = parent.getParent();
+            if (grandParent) {
+              parent
+                .getChildren()
+                .filter((node) => this.ReplacementNodeMap.has(node))
+                .forEach((child) => {
+                  this.ReplacementNodeMap.set(parent, {
+                    ...this.ReplacementNodeMap.get(child)!,
+                  });
+                  this.ReplacementNodeMap.delete(child);
+                });
+              // CHECK: node = parent; はいらない？
+              parent = grandParent;
+              continue; // 再度親をチェック
+            }
+          } else {
+            break;
           }
-        } else if (Node.isConditionalExpression(parent)) {
-          // const cond = parent.getCondition();
-          // const evaluated = this.tryEvaluateCondition(cond, varName, expected);
-          if (evaluated === true) {
-            parent.replaceWithText(parent.getWhenTrue().getText());
-          } else if (evaluated === false) {
-            parent.replaceWithText(parent.getWhenFalse().getText());
+
+          if (parent.getParent() === undefined) {
+            break;
           }
-        } else if (Node.isBinaryExpression(parent)) {
-          const op = parent.getOperatorToken().getKind();
-          const [left, right] = [parent.getLeft(), parent.getRight()];
-          const leftEval = this.tryEvaluateCondition(left, varName, expected);
-          // const rightEval = this.tryEvaluateCondition(right, varName, expected);
-          switch (op) {
-            case SyntaxKind.AmpersandAmpersandToken:
-              if (!!leftEval) {
-                parent.replaceWithText(right.getText());
-              } else {
-                parent.replaceWithText('false');
-                // this.trailBracket(parent);
-              }
-              break;
-            case SyntaxKind.BarBarToken:
-              if (!leftEval) {
-                parent.replaceWithText(right.getText());
-              } else {
-                parent.replaceWithText('false');
-                // this.trailBracket(parent);
-              }
-              break;
-          }
+          node = parent;
+          parent = parent.getParent()!;
         }
       }
-
+    }
+    this.ReplacementNodeMap.forEach((value, node) => {
+      if (node.wasForgotten()) return;
+      node.replaceWithText(value.replacement);
+    });
+    declarations.forEach((decl) => {
       // remove declaration if unused
       decl.remove();
       if (!decl.wasForgotten() && decl.findReferences().length === 0) {
         const statement = decl.getVariableStatement();
         if (statement) statement.remove();
       }
-    }
-  }
-
-  trailBracket(node: Node<ts.Node>): void {
-    if (node.wasForgotten()) return;
-    const parent = node.getParent();
-    if (!parent) return;
-    if (Node.isParenthesizedExpression(parent)) {
-      parent.replaceWithText('');
-    }
+    });
   }
 
   findUseValueDeclarations(
@@ -161,6 +243,7 @@ export class BranchReplacer {
       return { condition: undefined, parent: node };
     }
     let condition: boolean = tmp;
+    // this.trailBracketIfNeeded(node);
     while (parent !== undefined) {
       const parentCondition = this.tryEvaluateCondition(
         parent,
@@ -170,6 +253,7 @@ export class BranchReplacer {
       if (parentCondition === undefined) {
         break;
       }
+      // this.trailBracketIfNeeded(parent);
       condition = parentCondition;
       parent = parent.getParent();
     }
@@ -204,6 +288,15 @@ export class BranchReplacer {
     return undefined;
   };
 
+  private trailBracketIfNeeded(node: Node<ts.Node>): void {
+    if (node.wasForgotten()) return;
+    const parent = node.getParent();
+    if (!parent) return;
+    if (Node.isParenthesizedExpression(parent)) {
+      // If the parent is a ParenthesizedExpression, remove it
+      parent.replaceWithText(node.getText());
+    }
+  }
   private tryEvaluateCondition(
     node: Node<ts.Node>,
     varName: string,

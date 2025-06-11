@@ -22,7 +22,7 @@ describe('BranchReplacer.replaceUseValueBranchesWithKey - all conditions', () =>
   const key = 'role';
 
   test.each([
-    // simple boolean
+    // simple boolean with true
     [
       'if with boolean true',
       `import { useValue } from "@some-library";
@@ -32,8 +32,18 @@ describe('BranchReplacer.replaceUseValueBranchesWithKey - all conditions', () =>
       `import { useValue } from "@some-library";
        doA();`,
     ],
+    // simple boolean with false
+    [
+      'if with boolean false',
+      `import { useValue } from "@some-library";
+       const result = useValue("role");
+       if (!result) doA(); else doB();`,
+      true,
+      `import { useValue } from "@some-library";
+       doB();`,
+    ],
 
-    // string equality
+    // string equality === operator
     [
       "if result === 'admin'",
       `import { useValue } from "@some-library";
@@ -42,6 +52,16 @@ describe('BranchReplacer.replaceUseValueBranchesWithKey - all conditions', () =>
       'admin',
       `import { useValue } from "@some-library";
        doA();`,
+    ],
+    // string equality !== operator
+    [
+      "if result !== 'admin'",
+      `import { useValue } from "@some-library";
+       const result = useValue("role");
+       if (result !== "admin") doA(); else doB();`,
+      'admin',
+      `import { useValue } from "@some-library";
+       doB();`,
     ],
 
     // logical && and ||
@@ -52,10 +72,10 @@ describe('BranchReplacer.replaceUseValueBranchesWithKey - all conditions', () =>
        if ((result === "admin" && isAdmin()) || (result === "guest" && isGuest())) doX(); else doY();`,
       'admin',
       `import { useValue } from "@some-library";
-       if ((isAdmin()) || (false)) doX(); else doY();`,
+       if (isAdmin()) doX(); else doY();`,
     ],
 
-    // ternary
+    // ternary === operator
     [
       'ternary with ===',
       `import { useValue } from "@some-library";
@@ -64,6 +84,17 @@ describe('BranchReplacer.replaceUseValueBranchesWithKey - all conditions', () =>
       'admin',
       `import { useValue } from "@some-library";
        const label = "adminLabel";`,
+    ],
+
+    // ternary !== operator
+    [
+      'ternary with !==',
+      `import { useValue } from "@some-library";
+       const result = useValue("role");
+       const label = result !== "admin" ? "adminLabel" : "userLabel";`,
+      'admin',
+      `import { useValue } from "@some-library";
+       const label = "userLabel";`,
     ],
 
     // negation
